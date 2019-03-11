@@ -25,7 +25,7 @@ class Parser:
                          signature = _.type.spelling,
                          ret = _.result_type.spelling,
                          display = _.displayname,
-                         args = [arg.type.spelling for arg in _.get_children()]) for _ in self.node.get_children() if is_function(_)]
+                         args = [arg.type.spelling for arg in _.get_children() if arg.is_definition()]) for _ in self.node.get_children() if is_function(_)]
 
 class Mocker:
     def __init__(self, libName):
