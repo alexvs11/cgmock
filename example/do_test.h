@@ -7,5 +7,6 @@
 
 int function(int);
 int sum(double, EXT_TYPE);
+int other_function(int);
 
 #endif // DO_TEST

@@ -42,30 +42,55 @@ It uses two functions declared at do_test.h:
 
 int function(int)
 int sum(double, EXT_TYPE);
+int other_function(int);
+```
+File config.txt includes an example of filter:
+```
+# all lines started with # symbol are ignored
+function
+sum
 ```
 Here is a demonstration how it works:
   
 ```
-docker run --rm -it -v `pwd`:`pwd` --workdir `pwd` cgmock bash ./example/test.sh
-++ dirname ./example/test.sh
-+ dir=./example
-+ cd ./example
-+ echo 'generate mock.h from header...'
-generate mock.h from header...
-+ ../cgmock.py --file do_test.h -- -DEXT_TYPE=int -I.
+✗ docker run --rm -it -v `pwd`:`pwd` --workdir `pwd` cgmock bash ./example/test.sh
+++ dirname ./example/test.sh    
++ dir=./example                                                  
++ cd ./example          
++ echo 'generate mock.h from header...'       
+generate mock.h from header...                         
++ cat config.txt    
++ ../cgmock.py --filter=- --file do_test.h -- -DEXT_TYPE=int -I.
 + g++ test.cpp -pthread -lgtest -lgmock -o test
-+ echo 'executing test with mock...'
-executing test with mock...
-+ ./test
++ echo 'executing test with mock...'                                                                                         
+executing test with mock...                                                
++ ./test                            
 [==========] Running 1 test from 1 test suite.
+[----------] Global test environment set-up.
+[----------] 1 test from Fixture              
+[ RUN      ] Fixture.test                   
+[       OK ] Fixture.test (0 ms)
+[----------] 1 test from Fixture (0 ms total)                   
+                                
+[----------] Global test environment tear-down
+[==========] 1 test from 1 test suite ran. (0 ms total)
+[  PASSED  ] 1 test.                          
++ echo 'generate mock.h and mock.cpp separately...'    
+generate mock.h and mock.cpp separately...
++ ../cgmock.py --filter=config.txt --file do_test.h --gen-hpp-to-file=mock.h --gen-cpp-to-file=mock.cpp -- -DEXT_TYPE=int -I.
++ g++ mock.cpp test.cpp -pthread -lgtest -lgmock -o test         
++ echo 'executing test with mock...'           
+executing test with mock...                        
++ ./test                                                    
+[==========] Running 1 test from 1 test suite.                             
 [----------] Global test environment set-up.
 [----------] 1 test from Fixture
 [ RUN      ] Fixture.test
-[       OK ] Fixture.test (0 ms)
-[----------] 1 test from Fixture (0 ms total)
+[       OK ] Fixture.test (1 ms)
+[----------] 1 test from Fixture (1 ms total)
 
 [----------] Global test environment tear-down
-[==========] 1 test from 1 test suite ran. (0 ms total)
+[==========] 1 test from 1 test suite ran. (1 ms total)
 [  PASSED  ] 1 test.
 ```
     

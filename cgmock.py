@@ -3,6 +3,8 @@
 import argparse
 import clang.cindex as clang
 from clang.cindex import Index
+import sys
+import re
 
 class Function:
     def __init__(self, name, signature, ret, display, args):
@@ -13,32 +15,58 @@ class Function:
         self.args = args
 
 class Parser:
-    def __init__(self, file, clang_args):
+    def __init__(self, file, _filter, clang_args):
         index = Index.create()
         tu = index.parse(path = file, args = clang_args)
         self.node = tu.cursor
+        self.filter = _filter
 
     def getFunctions(self):
         assert self.node.kind == clang.CursorKind.TRANSLATION_UNIT
-        is_function = lambda node : node.kind == clang.CursorKind.FUNCTION_DECL
+        is_function = lambda node : (node.kind == clang.CursorKind.FUNCTION_DECL) and self.filter.satisfy(node.spelling)
         return [Function(name = _.spelling,
                          signature = _.type.spelling,
                          ret = _.result_type.spelling,
                          display = _.displayname,
                          args = [arg.type.spelling for arg in _.get_children() if arg.is_definition()]) for _ in self.node.get_children() if is_function(_)]
 
+class Filter:
+    def __init__(self, names):
+        self.names = names
+
+    def satisfy(self, name):
+        if self.names:
+            return name in self.names
+        else:
+            return True
+
+def FilterFromConfig(f):
+    if f is not None:
+        return Filter(
+            list(filter(lambda s : not re.match("^(#.*|)$", s),
+                        list(map(lambda s: s.rstrip(), f.readlines())))))
+    else:
+        return Filter([])
+
 class Mocker:
-    def __init__(self, libName):
+    def __init__(self, libName, functions):
         self.libName = libName
         self.interface = "Lib{}Interface".format(libName)
         self.mockobj = "Lib{}MockObj".format(libName)
         self.fPrefix = ""
+        self.functions = functions
+
+    def _for_all(self, f):
+        return "\n".join([f(_) for _ in self.functions])
 
     def _functionToInterface(self, f):
         return 'virtual {} {}{} = 0;'.format(f.ret, self.fPrefix, f.display)
 
     def _functionToMock(self, f):
         return 'MOCK_METHOD{}({}, {});'.format(len(f.args), f.name, f.signature)
+
+    def _functionToDeclaration(self, f):
+        return 'extern "C" {} {};'.format(f.ret, f.display)
 
     def _functionToWrapper(self, f):
         wrapper_args = ", ".join(["{} _{}".format(type, i) for i, type in enumerate(f.args)]) # [int, double] -> int _1, double _2
@@ -60,8 +88,7 @@ protected:
     {1}Mock mock_c;
 }};'''.format(self.mockobj, self.interface)
 
-    def generateMockHeader(self, functions):
-        for_all = lambda f : "\n".join([f(_) for _ in functions])
+    def generateMockHeader(self):
         return '''
 #pragma once
 #include "gtest/gtest.h"
@@ -82,31 +109,61 @@ public:
 }};
 
 //that object should be set from test's fixture
-{1}Mock* {4};
+extern {1}Mock* {4};
 
 //fixture to set mock object from test suite
 {5}
 
 }}
 
-//wrappers global definitions
+//forward declaration for wrappers
 {6}
-'''.format(self.libName, self.interface, for_all(self._functionToInterface), for_all(self._functionToMock),
-           self.mockobj, self._libFixture(), for_all(self._functionToWrapper))
+'''.format(self.libName, self.interface, self._for_all(self._functionToInterface),
+           self._for_all(self._functionToMock), self.mockobj, self._libFixture(), self._for_all(self._functionToDeclaration))
+
+    def generateMockDefinitions(self, headerName=None):
+        header = '#include "{}"'.format(headerName) if headerName else '//headerless'
+        return '''{0}
+//mock obj definition
+{1}::{2}Mock* {1}::{3} = nullptr;
+{4}
+//wrappers global definitions
+'''.format(header, self.libName, self.interface, self.mockobj, self._for_all(self._functionToWrapper))
+
+def write(mocker, hpp=None, cpp=None):
+    fileToWrite = lambda f: open(f, mode='w') if f else sys.stdout
+    fileToWrite(hpp).write(mocker.generateMockHeader())
+    fileToWrite(cpp).write(mocker.generateMockDefinitions(hpp))
 
 def main():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--file', help='header to mock', type=str, required=True)
     argparser.add_argument('--name', help='namespace name for mocks', default='MockLib')
+    argparser.add_argument('--filter', help='''filepath to a file with full names of C functions which should be mocked.
+#-started lines are ignored.
+If - specified instead of file name then stdin will be used.
+If not specified then mocks will be generated for all functions''')
+    argparser.add_argument('--gen-hpp-to-file', help='write header to a specified file', default=None)
+    argparser.add_argument('--gen-cpp-to-file', help='write definitions part to file', default=None)
+
     argparser.add_argument('--clanglib', help='path to libclang shared library', default='/usr/lib/llvm-6.0/lib/libclang-6.0.so.1')
     argparser.add_argument('clangargs', nargs=argparse.REMAINDER, help='list of clang compile args for correct parsing')
     args = argparser.parse_args()
-
     clang.Config.set_library_file(args.clanglib)
-    parser = Parser(args.file, list(filter(lambda arg : arg != '--', args.clangargs)))
-    mocker = Mocker(args.name)
 
-    print(mocker.generateMockHeader(parser.getFunctions()))
+    if bool(args.gen_hpp_to_file) ^ bool(args.gen_cpp_to_file):
+        assert not "only both or none of arguments cpp/hpp can be specified"
+    if args.filter == '':
+        config = None
+    elif args.filter == '-':
+        config = sys.stdin
+    else:
+        config = open(args.filter)
+
+    _filter = FilterFromConfig(config)
+    parser = Parser(args.file, _filter, list(filter(lambda arg : arg != '--', args.clangargs)))
+    mocker = Mocker(args.name, parser.getFunctions())
+    write(mocker, hpp=args.gen_hpp_to_file, cpp=args.gen_cpp_to_file)
 
 
 if __name__ == '__main__':

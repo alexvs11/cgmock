@@ -1,0 +1,3 @@
+# all lines started with # symbol are ignored
+function
+sum
