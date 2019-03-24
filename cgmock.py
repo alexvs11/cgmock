@@ -30,6 +30,18 @@ class Parser:
                          display = _.displayname,
                          args = [arg.type.spelling for arg in _.get_children() if arg.is_definition()]) for _ in self.node.get_children() if is_function(_)]
 
+class GroupParser:
+    def __init__(self, files, _filter, clang_args):
+        self.files = files
+        self._filter = _filter
+        self.clang_args = clang_args
+
+    def getFunctions(self):
+        res = []
+        for _ in self.files:
+            res += Parser(_, self._filter, self.clang_args).getFunctions()
+        return res
+
 class Filter:
     def __init__(self, names):
         self.names = names
@@ -137,7 +149,7 @@ def write(mocker, hpp=None, cpp=None):
 
 def main():
     argparser = argparse.ArgumentParser()
-    argparser.add_argument('--file', help='header to mock', type=str, required=True)
+    argparser.add_argument('--file', help='header to mock. If specified several times then several headers will be parsed', action='append', type=str, required=True)
     argparser.add_argument('--name', help='namespace name for mocks', default='MockLib')
     argparser.add_argument('--filter', help='''filepath to a file with full names of C functions which should be mocked.
 #-started lines are ignored.
@@ -153,7 +165,7 @@ If not specified then mocks will be generated for all functions''')
 
     if bool(args.gen_hpp_to_file) ^ bool(args.gen_cpp_to_file):
         assert not "only both or none of arguments cpp/hpp can be specified"
-    if args.filter == '':
+    if not args.filter:
         config = None
     elif args.filter == '-':
         config = sys.stdin
@@ -161,7 +173,7 @@ If not specified then mocks will be generated for all functions''')
         config = open(args.filter)
 
     _filter = FilterFromConfig(config)
-    parser = Parser(args.file, _filter, list(filter(lambda arg : arg != '--', args.clangargs)))
+    parser = GroupParser(args.file, _filter, list(filter(lambda arg : arg != '--', args.clangargs)))
     mocker = Mocker(args.name, parser.getFunctions())
     write(mocker, hpp=args.gen_hpp_to_file, cpp=args.gen_cpp_to_file)
 

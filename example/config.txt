@@ -1,3 +1,4 @@
 # all lines started with # symbol are ignored
 function
+function_from_second
 sum
